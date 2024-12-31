@@ -1,26 +1,47 @@
-from flask import Flask
-from flask import jsonify
-from flask import request
+from flask import jsonify, request
+from marshmallow import ValidationError
+from app import db
+from app.models import User, Category, Record, Currency
+from app.schemas import UserSchema, CategorySchema, RecordSchema, CurrencySchema
 from datetime import datetime
+from flask_smorest import Blueprint
 
-app = Flask(__name__)
 
-# Дані в пам'яті
-users = {}
-categories = {}
-records = {}
+bp = Blueprint("api", __name__, url_prefix="/api")
 
-# Counter для ідентифікаторів
-user_id_counter = 1
-category_id_counter = 1
-record_id_counter = 1
+# Ініціалізація схем
+user_schema = UserSchema()
+category_schema = CategorySchema()
+record_schema = RecordSchema()
+currency_schema = CurrencySchema()
 
-@app.route('/')
+# Обробка глобальних помилок
+@bp.errorhandler(ValidationError)
+def handle_validation_error(e):
+    return jsonify({"error": "Validation Error", "messages": e.messages}), 400
+
+@bp.errorhandler(Exception)
+def handle_exception(e):
+    return jsonify({
+        "error": "Internal Server Error",
+        "message": str(e),
+    }), 500
+
+@bp.errorhandler(404)
+def resource_not_found(e):
+    return jsonify(error=str(e)), 404
+
+@bp.errorhandler(400)
+def bad_request(e):
+    return jsonify(error=str(e)), 400
+
+
+@bp.route('/')
 def hello_world():
     return 'Hello, World!'
 
 
-@app.route('/healthcheck', methods=['GET'])
+@bp.route('/healthcheck', methods=['GET'])
 def healthcheck():
     response = {
         "status": "OK",
@@ -28,108 +49,135 @@ def healthcheck():
     }
     return jsonify(response), 200
 
-# 1. Ендпоінти для користувачів
-@app.route('/user', methods=['POST'])
-def create_user():
-    global user_id_counter
-    data = request.json
-    user = {
-        'id': user_id_counter,
-        'name': data.get('name')
-    }
-    users[user_id_counter] = user
-    user_id_counter += 1
-    return jsonify(user), 201
 
-@app.route('/user/<int:user_id>', methods=['GET'])
+# 1. Ендпоінти для користувачів
+@bp.route('/user', methods=['POST'])
+def create_user():
+    data = request.json
+    try:
+        validated_data = user_schema.load(data)  # Валідація даних
+
+        user = User(**validated_data)
+        db.session.add(user)
+        db.session.commit()
+
+        return jsonify(user_schema.dump(user)), 201
+    except ValidationError as e:
+        return jsonify({"error": e.messages}), 400
+
+
+@bp.route('/user/<int:user_id>', methods=['GET'])
 def get_user(user_id):
-    user = users.get(user_id)
+    user = User.query.get(user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
-    return jsonify(user)
+    return jsonify(user_schema.dump(user))
 
-@app.route('/user/<int:user_id>', methods=['DELETE'])
+
+@bp.route('/user/<int:user_id>', methods=['DELETE'])
 def delete_user(user_id):
-    if user_id not in users:
+    user = User.query.get(user_id)
+    if not user:
         return jsonify({'error': 'User not found'}), 404
-    del users[user_id]
+
+    db.session.delete(user)
+    db.session.commit()
     return '', 204
 
-@app.route('/users', methods=['GET'])
+
+@bp.route('/users', methods=['GET'])
 def get_users():
-    return jsonify(list(users.values()))
+    users = User.query.all()
+    return jsonify(user_schema.dump(users, many=True))
+
 
 # 2. Ендпоінти для категорій
-@app.route('/category', methods=['POST'])
+@bp.route('/category', methods=['POST'])
 def create_category():
-    global category_id_counter
     data = request.json
-    category = {
-        'id': category_id_counter,
-        'name': data.get('name')
-    }
-    categories[category_id_counter] = category
-    category_id_counter += 1
-    return jsonify(category), 201
+    try:
+        validated_data = category_schema.load(data)
 
-@app.route('/category', methods=['GET'])
+        category = Category(**validated_data)
+        db.session.add(category)
+        db.session.commit()
+
+        return jsonify(category_schema.dump(category)), 201
+
+    except ValidationError as e:
+        return jsonify({"error": e.messages}), 400
+
+@bp.route('/category', methods=['GET'])
 def get_categories():
-    return jsonify(list(categories.values()))
+    categories = Category.query.all()
+    return jsonify(category_schema.dump(categories, many=True))
 
-@app.route('/category/<int:category_id>', methods=['DELETE'])
+
+@bp.route('/category/<int:category_id>', methods=['DELETE'])
 def delete_category(category_id):
-    if category_id not in categories:
+    category = Category.query.get(category_id)
+    if not category:
         return jsonify({'error': 'Category not found'}), 404
-    del categories[category_id]
+
+    db.session.delete(category)
+    db.session.commit()
     return '', 204
+
 
 # 3. Ендпоінти для записів
-@app.route('/record', methods=['POST'])
+@bp.route('/record', methods=['POST'])
 def create_record():
-    global record_id_counter
     data = request.json
-    if data.get('user_id') not in users:
-        return jsonify({'error': 'User not found'}), 404
-    if data.get('category_id') not in categories:
-        return jsonify({'error': 'Category not found'}), 404
-    record = {
-        'id': record_id_counter,
-        'user_id': data.get('user_id'),
-        'category_id': data.get('category_id'),
-        'timestamp': datetime.now().isoformat(),
-        'amount': data.get('amount')
-    }
-    records[record_id_counter] = record
-    record_id_counter += 1
-    return jsonify(record), 201
+    try:
+        validated_data = record_schema.load(data)
 
-@app.route('/record/<int:record_id>', methods=['GET'])
+        record = Record(**validated_data)
+        db.session.add(record)
+        db.session.commit()
+
+        return jsonify(record_schema.dump(record)), 201
+    
+    except ValidationError as e:
+        return jsonify({"error": e.messages}), 400
+
+
+@bp.route('/record/<int:record_id>', methods=['GET'])
 def get_record(record_id):
-    record = records.get(record_id)
+    record = Record.query.get(record_id)
     if not record:
         return jsonify({'error': 'Record not found'}), 404
-    return jsonify(record)
+    return jsonify(record_schema.dump(record))
 
-@app.route('/record/<int:record_id>', methods=['DELETE'])
+
+@bp.route('/record/<int:record_id>', methods=['DELETE'])
 def delete_record(record_id):
-    if record_id not in records:
+    record = Record.query.get(record_id)
+    if not record:
         return jsonify({'error': 'Record not found'}), 404
-    del records[record_id]
+
+    db.session.delete(record)
+    db.session.commit()
     return '', 204
 
-@app.route('/record', methods=['GET'])
+
+@bp.route('/record', methods=['GET'])
 def get_records():
     user_id = request.args.get('user_id', type=int)
     category_id = request.args.get('category_id', type=int)
 
-    if not user_id and not category_id:
-        return jsonify({'error': 'User ID or Category ID is required'}), 400
+    query = Record.query
+    if user_id:
+        query = query.filter_by(user_id=user_id)
+    if category_id:
+        query = query.filter_by(category_id=category_id)
 
-    filtered_records = [
-        record for record in records.values()
-        if (not user_id or record['user_id'] == user_id) and
-           (not category_id or record['category_id'] == category_id)
-    ]
+    records = query.all()
+    return jsonify(record_schema.dump(records, many=True))
 
-    return jsonify(filtered_records)
+#4 Ендпоінти для валюти
+@bp.route('/currency', methods=['GET'])
+def get_currency():
+    currency = Currency.query.all()
+    return jsonify(currency_schema.dump(currency, many=True))
+
 
