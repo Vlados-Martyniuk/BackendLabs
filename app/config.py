@@ -2,7 +2,7 @@ import os
 
 PROPAGATE_EXCEPTIONS = True
 FLASK_DEBUG = True
-SQLALCHEMY_DATABASE_URI = "postgresql://postgres:vlad@localhost:5432/test"
+SQLALCHEMY_DATABASE_URI = "postgresql://postgre:QASyRK97sKhfBhCW4Zz7QYYIxoECtS5C@dpg-ctq1ijrqf0us73egcd1g-a.oregon-postgres.render.com/test_mnkf"
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 API_TITLE = "Finance REST API"
 API_VERSION = "v1"
