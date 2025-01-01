@@ -5,6 +5,10 @@ from app.models import User, Category, Record, Currency
 from app.schemas import UserSchema, CategorySchema, RecordSchema, CurrencySchema
 from datetime import datetime
 from flask_smorest import Blueprint
+from flask_jwt_extended import create_access_token, jwt_required
+from passlib.hash import pbkdf2_sha256
+
+
 
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -54,19 +58,34 @@ def healthcheck():
 @bp.route('/user', methods=['POST'])
 def create_user():
     data = request.json
-    try:
-        validated_data = user_schema.load(data)  # Валідація даних
 
-        user = User(**validated_data)
-        db.session.add(user)
-        db.session.commit()
+    validated_data = user_schema.load(data)
 
-        return jsonify(user_schema.dump(user)), 201
-    except ValidationError as e:
-        return jsonify({"error": e.messages}), 400
+    if User.query.filter_by(email=validated_data["email"]).first():
+        return jsonify({"error": "User already exists"}), 400
+    
+    user = User(name=validated_data["name"], email=validated_data["email"], password=pbkdf2_sha256.hash(validated_data["password"]))
+    db.session.add(user)
+    db.session.commit()
+    
+    return jsonify({"message": "User created successfully"}), 201
+    
+@bp.route('/login', methods=['POST'])
+def login():
+    data = request.json
+
+    user = User.query.filter_by(email=data.get("email")).first()
+
+    if user and pbkdf2_sha256.verify(data.get("password"), user.password):
+        access_token = create_access_token(identity=user.id)
+
+        return jsonify({"access_token": access_token}), 200
+    
+    return jsonify({"error": "Invalid email or password"}), 401
 
 
 @bp.route('/user/<int:user_id>', methods=['GET'])
+@jwt_required()
 def get_user(user_id):
     user = User.query.get(user_id)
     if not user:
@@ -75,6 +94,7 @@ def get_user(user_id):
 
 
 @bp.route('/user/<int:user_id>', methods=['DELETE'])
+@jwt_required()
 def delete_user(user_id):
     user = User.query.get(user_id)
     if not user:
@@ -86,6 +106,7 @@ def delete_user(user_id):
 
 
 @bp.route('/users', methods=['GET'])
+@jwt_required()
 def get_users():
     users = User.query.all()
     return jsonify(user_schema.dump(users, many=True))
@@ -93,6 +114,7 @@ def get_users():
 
 # 2. Ендпоінти для категорій
 @bp.route('/category', methods=['POST'])
+@jwt_required()
 def create_category():
     data = request.json
     try:
@@ -108,12 +130,14 @@ def create_category():
         return jsonify({"error": e.messages}), 400
 
 @bp.route('/category', methods=['GET'])
+@jwt_required()
 def get_categories():
     categories = Category.query.all()
     return jsonify(category_schema.dump(categories, many=True))
 
 
 @bp.route('/category/<int:category_id>', methods=['DELETE'])
+@jwt_required()
 def delete_category(category_id):
     category = Category.query.get(category_id)
     if not category:
@@ -126,6 +150,7 @@ def delete_category(category_id):
 
 # 3. Ендпоінти для записів
 @bp.route('/record', methods=['POST'])
+@jwt_required()
 def create_record():
     data = request.json
     try:
@@ -142,6 +167,7 @@ def create_record():
 
 
 @bp.route('/record/<int:record_id>', methods=['GET'])
+@jwt_required()
 def get_record(record_id):
     record = Record.query.get(record_id)
     if not record:
@@ -150,6 +176,7 @@ def get_record(record_id):
 
 
 @bp.route('/record/<int:record_id>', methods=['DELETE'])
+@jwt_required()
 def delete_record(record_id):
     record = Record.query.get(record_id)
     if not record:
@@ -161,6 +188,7 @@ def delete_record(record_id):
 
 
 @bp.route('/record', methods=['GET'])
+@jwt_required()
 def get_records():
     user_id = request.args.get('user_id', type=int)
     category_id = request.args.get('category_id', type=int)
@@ -176,6 +204,7 @@ def get_records():
 
 #4 Ендпоінти для валюти
 @bp.route('/currency', methods=['GET'])
+@jwt_required()
 def get_currency():
     currency = Currency.query.all()
     return jsonify(currency_schema.dump(currency, many=True))
